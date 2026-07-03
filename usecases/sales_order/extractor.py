@@ -15,16 +15,13 @@ from __future__ import annotations
 import base64
 import io
 import json
-import os
 from typing import Any
 
 import pdfplumber
-from dotenv import load_dotenv
 from openai import OpenAI
 
-load_dotenv()
-
-MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
+from shared.config import OPENAI_MODEL as MODEL
+from shared.config import get_openai_client
 
 EXTRACTION_PROMPT = """You are an AI that extracts purchase order data from documents.
 
@@ -55,12 +52,8 @@ Rules:
 
 
 def _client() -> OpenAI:
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise RuntimeError(
-            "OPENAI_API_KEY is not set. Copy .env.example to .env and add your key."
-        )
-    return OpenAI(api_key=api_key)
+    """Thin alias kept for backwards-compat; delegates to the shared client."""
+    return get_openai_client()
 
 
 def _read_pdf_bytes(pdf_file: Any) -> bytes:
