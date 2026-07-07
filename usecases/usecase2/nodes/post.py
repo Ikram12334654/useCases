@@ -42,7 +42,8 @@ def post(state: CashAppState) -> CashAppState:
     extracted = state.get("extracted", {})
     customer_id = state.get("recommendation", {}).get("customer_id") or extracted.get("customer", "UNKNOWN")
 
-    # Record the incoming payment itself (once), then apply it to the invoice(s).
+    # Record the incoming payment itself (once), with its dedup key so a
+    # re-uploaded remittance is later detected as a duplicate.
     if allocation:
         record_payment(
             customer_id,
@@ -50,6 +51,7 @@ def post(state: CashAppState) -> CashAppState:
             currency=extracted.get("currency", "USD"),
             received_date=extracted.get("date"),
             source_doc=state.get("document_path"),
+            dedup_key=state.get("recommendation", {}).get("dedup_key"),
         )
 
     applied: list[dict] = []

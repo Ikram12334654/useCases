@@ -38,7 +38,8 @@ CREATE TABLE IF NOT EXISTS payments (
     amount        REAL NOT NULL,
     currency      TEXT DEFAULT 'USD',
     received_date TEXT,
-    source_doc    TEXT
+    source_doc    TEXT,
+    dedup_key     TEXT              -- dedup key; duplicate remittances share it
 );
 
 CREATE TABLE IF NOT EXISTS audit_log (
@@ -69,10 +70,16 @@ def _connect(db_path: Path | str = DB_PATH) -> sqlite3.Connection:
 
 
 def init_db(db_path: Path | str = DB_PATH) -> None:
-    """Create the schema if it does not exist."""
+    """Create the schema if it does not exist (and apply light migrations)."""
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     with _connect(db_path) as conn:
         conn.executescript(SCHEMA)
+        # Migrations for DBs created before a column existed.
+        for stmt in ("ALTER TABLE payments ADD COLUMN dedup_key TEXT",):
+            try:
+                conn.execute(stmt)
+            except sqlite3.OperationalError:
+                pass  # column already exists
 
 
 # ── Reads ────────────────────────────────────────────────────────────────
@@ -169,16 +176,38 @@ def record_payment(
     currency: str = "USD",
     received_date: str | None = None,
     source_doc: str | None = None,
+    dedup_key: str | None = None,
     db_path: Path | str = DB_PATH,
 ) -> int:
     """Record an incoming payment in the ``payments`` table. Returns its id."""
     with _connect(db_path) as conn:
         cur = conn.execute(
-            "INSERT INTO payments (customer_id, amount, currency, received_date, source_doc) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (customer_id, amount, currency, received_date, source_doc),
+            "INSERT INTO payments (customer_id, amount, currency, received_date, source_doc, dedup_key) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (customer_id, amount, currency, received_date, source_doc, dedup_key),
         )
         return int(cur.lastrowid)
+
+
+def payment_exists(dedup_key: str, db_path: Path | str = DB_PATH) -> dict | None:
+    """Return the already-applied payment with this dedup key, or None.
+
+    This is the idempotency check: a non-None result means the payment was
+    already posted, so re-applying it would be a duplicate.
+    """
+    if not dedup_key:
+        return None
+    try:
+        with _connect(db_path) as conn:
+            row = conn.execute(
+                "SELECT * FROM payments WHERE dedup_key = ? ORDER BY payment_id LIMIT 1",
+                (dedup_key,),
+            ).fetchone()
+    except sqlite3.OperationalError:
+        # payments table/column not present yet (unmigrated / fresh db) — can't
+        # know of a duplicate. Real entry points call init_db() first.
+        return None
+    return dict(row) if row else None
 
 
 def record_dispute(

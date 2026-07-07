@@ -52,6 +52,11 @@ EXTRACTION_TOOL = {
                 },
                 "currency": {"type": "string", "description": "ISO currency code, e.g. USD."},
                 "date": {"type": "string", "description": "Payment date if present (YYYY-MM-DD)."},
+                "reference": {
+                    "type": "string",
+                    "description": "Payment reference that uniquely identifies this payment: "
+                                   "check number, wire confirmation, or lockbox batch id, if present.",
+                },
                 "total_amount": {"type": "number", "description": "Total money received in this payment."},
                 "invoices": {
                     "type": "array",
@@ -113,6 +118,8 @@ SYSTEM_PROMPT = (
     "genuine dispute (short-ship, damage, pricing) — use the reason_code accordingly. Use "
     "UNKNOWN only when the amount is short but no reason is given.\n"
     "- Put the customer's own words for a deduction in 'note'.\n"
+    "- Capture the payment reference (check number / wire confirmation / lockbox batch id) in "
+    "'reference' when present — it is used to detect duplicate remittances.\n"
     "- confidence (0-1): lower it when the document is ambiguous, unreadable, missing an "
     "invoice number, or when deductions don't add up to the shortfall.\n"
     "- Always respond by calling the record_remittance function."

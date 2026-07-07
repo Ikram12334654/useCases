@@ -20,7 +20,7 @@ import streamlit as st
 
 from .config import DATA_DIR, DB_PATH, SAMPLE_PAYMENTS_DIR
 from .data.seed import seed as seed_db
-from .db import _connect, get_audit_log, get_disputes, get_open_invoices
+from .db import _connect, get_audit_log, get_disputes, get_open_invoices, init_db
 from .service import resume as svc_resume
 from .service import start as svc_start
 
@@ -49,6 +49,7 @@ _STYLE = {
 
 # ── helpers ──────────────────────────────────────────────────────────────
 def _ensure_seeded() -> None:
+    init_db()  # creates schema + applies migrations (e.g. payments.dedup_key)
     if not DB_PATH.exists():
         seed_db()
         return
@@ -226,6 +227,14 @@ def _panel_submit() -> None:
 def _panel_review() -> None:
     rec = st.session_state["recommendation"]
     st.subheader("2 · Review this payment")
+
+    # Duplicate remittance guard — the loudest thing on the screen.
+    if rec.get("duplicate"):
+        ex = rec.get("existing_payment") or {}
+        st.error(f"⚠️ **Possible DUPLICATE payment.** A matching payment was already applied "
+                 f"(payment #{ex.get('payment_id')}, {_money(ex.get('amount'))} on "
+                 f"{ex.get('received_date') or '—'}). Posting again would wrongly reduce the "
+                 f"balance. **Recommended: Reject** unless this is a genuinely separate payment.")
 
     # Plain-English banner anyone can read.
     st.info("🧾 " + _plain_summary(rec))
