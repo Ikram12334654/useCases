@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import glob
 import os
+import traceback
 from pathlib import Path
 
 import streamlit as st
@@ -87,23 +88,33 @@ def _save_upload(uploaded) -> str:
     return str(dest)
 
 
-def _process(path: str) -> None:
-    st.session_state["counter"] = st.session_state.get("counter", 0) + 1
-    tid = f"{os.path.basename(path)}-{st.session_state['counter']}"
+def _fail(prefix: str, exc: Exception) -> None:
+    """Record an error so render() shows a page-level banner, then rerun."""
+    st.session_state["error"] = f"{prefix}{type(exc).__name__}: {exc}"
+    st.session_state["error_detail"] = traceback.format_exc()
+    st.rerun()
+
+
+def _process(src, is_upload: bool = False) -> None:
+    """Start a payment. Wraps EVERYTHING (upload save + graph run) so any failure
+    surfaces as a visible banner instead of a silent no-op."""
     try:
+        path = _save_upload(src) if is_upload else src
+        st.session_state["counter"] = st.session_state.get("counter", 0) + 1
+        tid = f"{os.path.basename(path)}-{st.session_state['counter']}"
         with st.spinner("AI reading the document and matching it against open invoices…"):
             res = svc_start(path, tid)
-    except Exception as e:  # AI/graph failed — surface it, don't show "no data"
-        _error_dialog(f"{type(e).__name__}: {e}")
+        st.session_state["thread_id"] = tid
+        st.session_state["doc"] = path
+        if res["status"] == "auto_posted":
+            st.session_state["result"] = {"auto": True, "final": res["final"]}
+            st.session_state["phase"] = "done"
+        else:
+            st.session_state["recommendation"] = res["recommendation"]
+            st.session_state["phase"] = "paused"
+    except Exception as e:
+        _fail("Processing failed — ", e)
         return
-    st.session_state["thread_id"] = tid
-    st.session_state["doc"] = path
-    if res["status"] == "auto_posted":
-        st.session_state["result"] = {"auto": True, "final": res["final"]}
-        st.session_state["phase"] = "done"
-    else:
-        st.session_state["recommendation"] = res["recommendation"]
-        st.session_state["phase"] = "paused"
     st.rerun()
 
 
@@ -111,7 +122,7 @@ def _do_resume(decision: dict) -> None:
     try:
         out = svc_resume(st.session_state["thread_id"], decision)
     except Exception as e:
-        _error_dialog(f"{type(e).__name__}: {e}")
+        _fail("Posting failed — ", e)
         return
     st.session_state["result"] = {"auto": False, "decision": decision, "final": out["final"]}
     st.session_state["phase"] = "done"
