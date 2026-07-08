@@ -129,15 +129,59 @@ def _do_resume(decision: dict) -> None:
     st.rerun()
 
 
-# ── error modal — shown when the AI / graph fails ────────────────────────
-@st.dialog("⚠️ Something went wrong")
-def _error_dialog(message: str) -> None:
-    st.error("The system hit an error while processing this payment and could not finish.")
-    st.caption("What happened (share this with support if it persists):")
-    st.code(message or "Unknown error")
-    st.caption("Close this box (× top-right) and try again, or reset the demo data.")
-    if st.button("Close", width="stretch"):
+# ── error banner — always visible when the AI / graph fails ──────────────
+def _render_error_banner() -> None:
+    st.error("⚠️ " + st.session_state.get("error", "Something went wrong."))
+    with st.expander("Technical details (share with support)"):
+        st.code(st.session_state.get("error_detail", "(no detail)"))
+    if st.button("✖ Dismiss error", width="stretch"):
+        st.session_state.pop("error", None)
+        st.session_state.pop("error_detail", None)
         st.rerun()
+
+
+def _diagnostics() -> None:
+    """Environment health — the first place to look when a deployment misbehaves."""
+    with st.expander("🩺 Diagnostics"):
+        # OpenAI key
+        try:
+            from shared.config import get_openai_api_key
+
+            get_openai_api_key()
+            st.write("OpenAI key: ✅ detected")
+        except Exception as e:
+            st.write(f"OpenAI key: ❌ {e}")
+        # Model + core imports
+        from .config import LLM_MODEL
+
+        st.write(f"Model: `{LLM_MODEL}`")
+        for label, mod in (("langgraph", "langgraph"),
+                           ("langgraph-sqlite", "langgraph.checkpoint.sqlite"),
+                           ("openai", "openai"), ("pdfplumber", "pdfplumber")):
+            try:
+                __import__(mod)
+                st.write(f"{label}: ✅")
+            except Exception as e:
+                st.write(f"{label}: ❌ {type(e).__name__}")
+        # Database
+        try:
+            init_db()
+            with _connect() as conn:
+                n = conn.execute("SELECT COUNT(*) FROM customers").fetchone()[0]
+            st.write(f"Database: ✅ writable ({n} customers)")
+        except Exception as e:
+            st.write(f"Database: ❌ {e}")
+        # Live OpenAI self-test (a real 1-token call)
+        if st.button("🧪 Test OpenAI call"):
+            try:
+                from .config import get_llm_client
+                get_llm_client().chat.completions.create(
+                    model=LLM_MODEL, max_tokens=1,
+                    messages=[{"role": "user", "content": "ping"}],
+                )
+                st.success("OpenAI call succeeded ✅")
+            except Exception as e:
+                st.error(f"OpenAI call FAILED: {type(e).__name__}: {e}")
 
 
 # ── the modal approval dialog — JUST the decision (approve / reject) ─────
@@ -220,6 +264,7 @@ def _sidebar() -> None:
                 st.caption("No activity yet.")
             for row in audit[-8:][::-1]:
                 st.caption(f"{row['stage']} · {row['ts'][11:19]}")
+        _diagnostics()
 
 
 def _panel_submit() -> None:
@@ -237,7 +282,7 @@ def _panel_submit() -> None:
         if up.name.lower().endswith(".txt"):
             st.code(up.getvalue().decode("utf-8", "ignore"), language="text")
         if st.button("▶ Process payment", type="primary", width="stretch"):
-            _process(_save_upload(up))
+            _process(up, is_upload=True)
 
     with st.expander("…or try a built-in sample payment"):
         docs = sorted(glob.glob(str(SAMPLE_PAYMENTS_DIR / "*.txt")))
@@ -363,10 +408,17 @@ def render() -> None:
     st.title("💵 Cash Application — Review Queue")
     st.caption("Match incoming payments to open invoices. Clean matches auto-post; "
                "the long tail pauses for human approval — the AI recommends, a person decides.")
+
+    # A failure anywhere shows here — impossible to miss, unlike a modal.
+    if st.session_state.get("error"):
+        _render_error_banner()
+
     try:
         _ensure_seeded()
     except Exception as e:  # e.g. read-only filesystem in a deployment
-        _error_dialog(f"Could not initialize the demo database: {type(e).__name__}: {e}")
+        st.session_state["error"] = f"Could not initialize the demo database: {type(e).__name__}: {e}"
+        st.session_state["error_detail"] = traceback.format_exc()
+        _render_error_banner()
         return
     st.session_state.setdefault("phase", "idle")
 
