@@ -20,9 +20,9 @@ USE_CASES = [
     {
         "key": "usecase3",
         "number": 3,
-        "title": "Use Case 3",
-        "icon": "🧩",
-        "tagline": "Placeholder — to be defined.",
-        "status": "planned",
+        "title": "Automate AP Invoice Matching",
+        "icon": "🧾",
+        "tagline": "3-way match supplier invoices → POs + goods receipts → auto-post clean matches or route variances to review.",
+        "status": "live",
     },
 ]

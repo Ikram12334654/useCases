@@ -1,0 +1,20 @@
+[
+  {
+    "receipt_id": "REC-2026-001",
+    "po_number": "PO-2026-001",
+    "vendor": "MedSupply Corp",
+    "received_date": "2026-06-22"
+  },
+  {
+    "receipt_id": "REC-2026-002",
+    "po_number": "PO-2026-002",
+    "vendor": "PharmaCo Ltd",
+    "received_date": "2026-06-28"
+  },
+  {
+    "receipt_id": "REC-2026-003",
+    "po_number": "PO-2026-003",
+    "vendor": "SurgTech Inc",
+    "received_date": "2026-06-01"
+  }
+]

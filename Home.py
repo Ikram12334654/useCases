@@ -9,11 +9,45 @@ This page is the entry point and lists the available use cases.
 
 from __future__ import annotations
 
+import warnings
+
+# Python 3.14 note: LangChain (UC2) still imports Pydantic v1 internally, which
+# emits a "Core Pydantic V1 functionality isn't compatible with Python 3.14"
+# UserWarning at import time. It's non-fatal; silence it here (process-wide,
+# before any page imports LangChain) so the suite's output stays clean.
+warnings.filterwarnings(
+    "ignore",
+    message=r"Core Pydantic V1 functionality isn't compatible with Python 3\.14.*",
+)
+
 import streamlit as st
 
 from usecases import USE_CASES
 
 st.set_page_config(page_title="Use Case Suite", page_icon="🗂️", layout="wide")
+
+
+@st.cache_resource
+def _start_backends() -> dict[str, bool]:
+    """Boot the use-case FastAPI backends once per Streamlit session.
+
+    Runs under cache_resource so it fires a single time (not on every rerun).
+    Each start is best-effort: a backend that can't launch just reports False
+    and the rest of the suite still loads. UC1 → :8000, UC3 → :8001.
+    """
+    from usecases.sales_order.api.runtime import ensure_api_running as start_uc1
+    from usecases.usecase3.api.runtime import ensure_api_running as start_uc3
+
+    status: dict[str, bool] = {}
+    for name, starter in (("Sales Order API", start_uc1), ("AP Matching API", start_uc3)):
+        try:
+            status[name] = starter(timeout=20)
+        except Exception:  # noqa: BLE001 — never let a backend break the landing page
+            status[name] = False
+    return status
+
+
+_backends = _start_backends()
 
 st.title("🗂️ Use Case Suite")
 st.caption("A collection of AI-assisted business automation demos. Pick one to begin.")

@@ -1,0 +1,78 @@
+{
+  "purchase_orders": [
+    {
+      "po_number": "PO-2026-001",
+      "vendor": "MedSupply Corp",
+      "line_items": [
+        {"part_number": "MS-100", "description": "Nitrile Gloves (Box)", "quantity": 100, "unit_price": 12.50},
+        {"part_number": "MS-200", "description": "Surgical Masks (Box)", "quantity": 50, "unit_price": 8.00}
+      ]
+    },
+    {
+      "po_number": "PO-2026-002",
+      "vendor": "PharmaCo Ltd",
+      "line_items": [
+        {"part_number": "PC-10", "description": "Saline 500ml", "quantity": 200, "unit_price": 3.25}
+      ]
+    },
+    {
+      "po_number": "PO-2026-003",
+      "vendor": "SurgTech Inc",
+      "line_items": [
+        {"part_number": "ST-55", "description": "Scalpel Blades (Pack)", "quantity": 40, "unit_price": 15.00}
+      ]
+    }
+  ],
+  "receipts": [
+    {
+      "po_number": "PO-2026-001",
+      "vendor": "MedSupply Corp",
+      "line_items": [
+        {"part_number": "MS-100", "qty_received": 100},
+        {"part_number": "MS-200", "qty_received": 50}
+      ]
+    },
+    {
+      "po_number": "PO-2026-002",
+      "vendor": "PharmaCo Ltd",
+      "line_items": [
+        {"part_number": "PC-10", "qty_received": 200}
+      ]
+    },
+    {
+      "po_number": "PO-2026-003",
+      "vendor": "SurgTech Inc",
+      "line_items": [
+        {"part_number": "ST-55", "qty_received": 38}
+      ]
+    }
+  ],
+  "invoices": [
+    {
+      "invoice_number": "INV-1001",
+      "vendor": "MedSupply Corp",
+      "po_number": "PO-2026-001",
+      "line_items": [
+        {"part_number": "MS-100", "description": "Nitrile Gloves (Box)", "quantity": 100, "unit_price": 12.50},
+        {"part_number": "MS-200", "description": "Surgical Masks (Box)", "quantity": 50, "unit_price": 8.00}
+      ]
+    },
+    {
+      "invoice_number": "INV-1002",
+      "vendor": "PharmaCo Ltd",
+      "po_number": "PO-2026-002",
+      "line_items": [
+        {"part_number": "PC-10", "description": "Saline 500ml", "quantity": 200, "unit_price": 3.75}
+      ]
+    },
+    {
+      "invoice_number": "INV-1003",
+      "vendor": "SurgTech Inc",
+      "po_number": "PO-2026-003",
+      "line_items": [
+        {"part_number": "ST-55", "description": "Scalpel Blades (Pack)", "quantity": 40, "unit_price": 15.00},
+        {"part_number": "ST-99", "description": "Bone Saw", "quantity": 5, "unit_price": 20.00}
+      ]
+    }
+  ]
+}
