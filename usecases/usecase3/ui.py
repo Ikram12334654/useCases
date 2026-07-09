@@ -265,47 +265,6 @@ def _severity(days_overdue: Any) -> tuple[str, str, str]:
     return "Watch", "#2563eb", "🔵"
 
 
-def _alert_card(a: dict[str, Any]) -> str:
-    """Render one alert as a self-contained HTML card."""
-    label, color, dot = _severity(a.get("days_overdue"))
-    vendor = a.get("vendor") or "—"
-    receipt_id = a.get("receipt_id") or "—"
-    po_number = a.get("po_number") or "—"
-    received = a.get("received_date") or "—"
-    days = a.get("days_overdue")
-    days_txt = f"{days} days" if days is not None else "—"
-    status = a.get("status") or "—"
-    alerted = a.get("alerted_at") or "—"
-
-    def cell(lbl: str, val: str) -> str:
-        return (
-            f'<div style="min-width:120px">'
-            f'<div style="font-size:0.72rem;text-transform:uppercase;letter-spacing:.04em;'
-            f'color:#6b7280;margin-bottom:2px">{lbl}</div>'
-            f'<div style="font-size:0.95rem;font-weight:600;color:#111827">{val}</div>'
-            f"</div>"
-        )
-
-    return f"""
-    <div style="border:1px solid #e5e7eb;border-left:5px solid {color};border-radius:12px;
-                padding:16px 18px;margin-bottom:12px;background:#ffffff;
-                box-shadow:0 1px 2px rgba(0,0,0,0.04)">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <div style="font-size:1.05rem;font-weight:700;color:#111827">{dot}&nbsp;{vendor}</div>
-        <span style="background:{color};color:#fff;font-size:0.72rem;font-weight:700;
-                     padding:3px 10px;border-radius:999px;letter-spacing:.03em">{label} · {days_txt}</span>
-      </div>
-      <div style="display:flex;flex-wrap:wrap;gap:20px 28px">
-        {cell("Receipt", receipt_id)}
-        {cell("PO Number", po_number)}
-        {cell("Received", received)}
-        {cell("Status", status)}
-        {cell("Alerted", alerted)}
-      </div>
-    </div>
-    """
-
-
 def _alerts_tab() -> None:
     # Show exactly what's saved in alerts.json, served by GET /uc3/alerts.
     try:
@@ -315,36 +274,71 @@ def _alerts_tab() -> None:
         return
 
     if not alerts:
-        st.markdown(
-            '<div style="text-align:center;padding:48px 16px;color:#6b7280">'
-            '<div style="font-size:2.4rem">✅</div>'
-            '<div style="font-size:1.05rem;font-weight:600;margin-top:8px;color:#111827">All clear</div>'
-            '<div style="font-size:0.9rem">No open alerts in the audit trail.</div>'
-            "</div>",
-            unsafe_allow_html=True,
-        )
+        st.success("✅ All clear — no open alerts in the audit trail.")
         return
 
-    # KPI summary row.
+    # Compact KPI row.
     days_vals = [int(a.get("days_overdue") or 0) for a in alerts]
     vendors = {a.get("vendor") for a in alerts if a.get("vendor")}
     c1, c2, c3 = st.columns(3)
     c1.metric("Open alerts", len(alerts))
-    c2.metric("Vendors affected", len(vendors))
-    c3.metric("Max days overdue", max(days_vals) if days_vals else 0)
+    c2.metric("Vendors", len(vendors))
+    c3.metric("Max overdue", f"{max(days_vals) if days_vals else 0}d")
 
-    st.markdown("")  # a little breathing room
-
-    # Newest first (by alerted_at), then most overdue.
+    # Dense table, newest first then most overdue. One row each — no scroll bloat.
     ordered = sorted(
         alerts,
         key=lambda a: (a.get("alerted_at") or "", int(a.get("days_overdue") or 0)),
         reverse=True,
     )
-    st.markdown(
-        "".join(_alert_card(a) for a in ordered),
-        unsafe_allow_html=True,
-    )
+    rows = [
+        {
+            "": _severity(a.get("days_overdue"))[2],  # severity emoji
+            "Vendor": a.get("vendor"),
+            "Receipt": a.get("receipt_id"),
+            "PO": a.get("po_number"),
+            "Received": a.get("received_date"),
+            "Overdue": a.get("days_overdue"),
+            "Status": a.get("status"),
+        }
+        for a in ordered
+    ]
+    st.dataframe(rows, use_container_width=True, hide_index=True)
+
+
+# --------------------------------------------------------------------------- #
+# Sidebar — the mock AP ledger (posted / paid invoices), like UC2's D365 panel
+# --------------------------------------------------------------------------- #
+def _sidebar() -> None:
+    with st.sidebar:
+        st.header("🗄️ Mock AP Ledger")
+        st.caption("System of record — invoices posted for payment.")
+
+        try:
+            posted = _get("/uc3/posted-invoices")
+        except Exception as exc:  # noqa: BLE001
+            st.error(_api_error(exc))
+            return
+
+        if not posted:
+            st.info("No posted invoices yet. Auto-post a clean match to populate this.")
+            return
+
+        total_paid = sum((p.get("invoice_amount") or 0) for p in posted)
+        c1, c2 = st.columns(2)
+        c1.metric("Posted", len(posted))
+        c2.metric("Total paid", f"${total_paid:,.0f}")
+
+        # Dense table, newest first — far less scroll than one card per invoice.
+        rows = [
+            {
+                "Invoice": p.get("invoice_number"),
+                "Amount": p.get("invoice_amount"),
+                "Ref": p.get("payment_ref"),
+            }
+            for p in sorted(posted, key=lambda r: r.get("posted_at") or "", reverse=True)
+        ]
+        st.dataframe(rows, use_container_width=True, hide_index=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -368,6 +362,8 @@ def render() -> None:
             "Start it with: `uvicorn usecases.usecase3.api.main:app --port 8001`"
         )
         return
+
+    _sidebar()
 
     tab_match, tab_review, tab_alerts = st.tabs(
         ["🔍 Match Invoice", "🚩 Review Queue", "🔔 Alerts"]

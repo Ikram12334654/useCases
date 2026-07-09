@@ -14,6 +14,7 @@ POST /uc3/flag-invoice      queue an invoice with variances for human review
 POST /uc3/match-invoice     3-way match one invoice (invoice ↔ PO ↔ receipt)
 GET  /uc3/flagged-invoices  list the review queue
 POST /uc3/post-invoice      approve + post an invoice, mint a payment reference
+GET  /uc3/posted-invoices   list the posted (paid) AP ledger
 GET  /uc3/check-alerts      goods received but not yet invoiced (accrual risk)
 POST /uc3/save-alert        persist an alert to the audit trail
 GET  /uc3/alerts            list every saved alert
@@ -145,6 +146,15 @@ def flagged_invoices() -> list[dict]:
         return read_json(FLAGGED_INVOICES_PATH, default=[])
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(500, f"Failed to read flagged invoices: {exc}") from exc
+
+
+@app.get("/uc3/posted-invoices")
+def posted_invoices() -> list[dict]:
+    """Return every posted (approved + paid) invoice — the mock AP ledger."""
+    try:
+        return read_json(POSTED_INVOICES_PATH, default=[])
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(500, f"Failed to read posted invoices: {exc}") from exc
 
 
 @app.post("/uc3/post-invoice")
