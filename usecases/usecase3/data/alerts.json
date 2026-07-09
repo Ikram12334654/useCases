@@ -1,0 +1,11 @@
+[
+  {
+    "receipt_id": "REC-2026-003",
+    "vendor": "SurgTech Inc",
+    "po_number": "PO-2026-003",
+    "received_date": "2026-06-01",
+    "days_overdue": 37,
+    "status": "Alert - Pending Action",
+    "alerted_at": "2026-07-09 19:47:13"
+  }
+]

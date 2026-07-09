@@ -10,7 +10,7 @@ Tabs
 ----
 Match Invoice : pick a sample invoice → 3-way match → post (clean) or flag (variance)
 Review Queue  : GET /uc3/flagged-invoices → approve+post a pending item
-Alerts        : GET /uc3/check-alerts → goods received but not invoiced
+Alerts        : GET /uc3/alerts → the saved alerts from alerts.json
 """
 
 from __future__ import annotations
@@ -127,12 +127,36 @@ def _match_tab() -> None:
                 st.write(f"- {f}")
 
     st.divider()
+    match_summary = {"match_result": match["match_result"], "flags": match["flags"]}
+
+    # A clean 3-way match needs no human sign-off — it auto-posts, booked as
+    # system-approved. Only variances route to a person (approve or flag).
+    if match["match_result"] == "PERFECT_MATCH":
+        st.caption("Clean 3-way match — no human approval required; posts automatically.")
+        if st.button("💸 Auto-post", type="primary", use_container_width=True):
+            try:
+                out = _post(
+                    "/uc3/post-invoice",
+                    {
+                        "invoice_number": invoice["invoice_number"],
+                        "vendor": invoice["vendor"],
+                        "po_number": invoice["po_number"],
+                        "invoice_amount": total,
+                        "match_result": match_summary,
+                        "status": "Posted",
+                        "approved_by": "system (auto-post)",
+                    },
+                )
+                st.success(f"Auto-posted. Payment reference **{out['payment_ref']}**.")
+            except Exception as exc:  # noqa: BLE001
+                st.error(_api_error(exc))
+        return
+
+    # Variance path: a human must approve to post, or flag for the review queue.
     approved_by = st.text_input(
         "Approver", value=st.session_state.get("uc3_approver", "demo.user")
     )
     st.session_state["uc3_approver"] = approved_by
-
-    match_summary = {"match_result": match["match_result"], "flags": match["flags"]}
 
     col_post, col_flag = st.columns(2)
     with col_post:
@@ -165,11 +189,12 @@ def _match_tab() -> None:
                     "/uc3/flag-invoice",
                     {
                         "invoice_number": invoice["invoice_number"],
-                        "vendor_name": invoice["vendor"],
+                        "vendor": invoice["vendor"],
                         "po_number": invoice["po_number"],
-                        "total_amount": total,
-                        "match_result": match_summary,
+                        "invoice_amount": total,
+                        "match_result": match["match_result"],
                         "status": "Pending Review",
+                        "approved_by": "System",
                     },
                 )
                 st.success(f"{invoice['invoice_number']} flagged for review.")
@@ -198,7 +223,7 @@ def _review_tab() -> None:
     st.divider()
     st.subheader("Approve a pending invoice")
     labels = [
-        f"{p['invoice_number']} — {p.get('vendor_name')} (${(p.get('total_amount') or 0):,.2f})"
+        f"{p['invoice_number']} — {p.get('vendor')} (${(p.get('invoice_amount') or 0):,.2f})"
         for p in pending
     ]
     idx = st.selectbox("Pending invoice", range(len(pending)), format_func=lambda i: labels[i])
@@ -213,9 +238,9 @@ def _review_tab() -> None:
                 "/uc3/post-invoice",
                 {
                     "invoice_number": chosen["invoice_number"],
-                    "vendor": chosen.get("vendor_name"),
+                    "vendor": chosen.get("vendor"),
                     "po_number": chosen.get("po_number"),
-                    "invoice_amount": chosen.get("total_amount"),
+                    "invoice_amount": chosen.get("invoice_amount"),
                     "match_result": chosen.get("match_result"),
                     "status": "Posted",
                     "approved_by": approver.strip(),
@@ -227,19 +252,99 @@ def _review_tab() -> None:
             st.error(_api_error(exc))
 
 
-def _alerts_tab() -> None:
+def _severity(days_overdue: Any) -> tuple[str, str, str]:
+    """Map days-overdue → (label, hex color, emoji) for the alert cards."""
     try:
-        alerts = _get("/uc3/check-alerts")
+        d = int(days_overdue)
+    except (TypeError, ValueError):
+        d = 0
+    if d >= 60:
+        return "Critical", "#dc2626", "🔴"
+    if d >= 30:
+        return "High", "#d97706", "🟠"
+    return "Watch", "#2563eb", "🔵"
+
+
+def _alert_card(a: dict[str, Any]) -> str:
+    """Render one alert as a self-contained HTML card."""
+    label, color, dot = _severity(a.get("days_overdue"))
+    vendor = a.get("vendor") or "—"
+    receipt_id = a.get("receipt_id") or "—"
+    po_number = a.get("po_number") or "—"
+    received = a.get("received_date") or "—"
+    days = a.get("days_overdue")
+    days_txt = f"{days} days" if days is not None else "—"
+    status = a.get("status") or "—"
+    alerted = a.get("alerted_at") or "—"
+
+    def cell(lbl: str, val: str) -> str:
+        return (
+            f'<div style="min-width:120px">'
+            f'<div style="font-size:0.72rem;text-transform:uppercase;letter-spacing:.04em;'
+            f'color:#6b7280;margin-bottom:2px">{lbl}</div>'
+            f'<div style="font-size:0.95rem;font-weight:600;color:#111827">{val}</div>'
+            f"</div>"
+        )
+
+    return f"""
+    <div style="border:1px solid #e5e7eb;border-left:5px solid {color};border-radius:12px;
+                padding:16px 18px;margin-bottom:12px;background:#ffffff;
+                box-shadow:0 1px 2px rgba(0,0,0,0.04)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div style="font-size:1.05rem;font-weight:700;color:#111827">{dot}&nbsp;{vendor}</div>
+        <span style="background:{color};color:#fff;font-size:0.72rem;font-weight:700;
+                     padding:3px 10px;border-radius:999px;letter-spacing:.03em">{label} · {days_txt}</span>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:20px 28px">
+        {cell("Receipt", receipt_id)}
+        {cell("PO Number", po_number)}
+        {cell("Received", received)}
+        {cell("Status", status)}
+        {cell("Alerted", alerted)}
+      </div>
+    </div>
+    """
+
+
+def _alerts_tab() -> None:
+    # Show exactly what's saved in alerts.json, served by GET /uc3/alerts.
+    try:
+        alerts = _get("/uc3/alerts")
     except Exception as exc:  # noqa: BLE001
         st.error(_api_error(exc))
         return
 
     if not alerts:
-        st.success("No open alerts — every received PO has a posted invoice.")
+        st.markdown(
+            '<div style="text-align:center;padding:48px 16px;color:#6b7280">'
+            '<div style="font-size:2.4rem">✅</div>'
+            '<div style="font-size:1.05rem;font-weight:600;margin-top:8px;color:#111827">All clear</div>'
+            '<div style="font-size:0.9rem">No open alerts in the audit trail.</div>'
+            "</div>",
+            unsafe_allow_html=True,
+        )
         return
 
-    st.warning(f"{len(alerts)} goods receipt(s) received but not invoiced (≥ 30 days).")
-    st.dataframe(alerts, use_container_width=True, hide_index=True)
+    # KPI summary row.
+    days_vals = [int(a.get("days_overdue") or 0) for a in alerts]
+    vendors = {a.get("vendor") for a in alerts if a.get("vendor")}
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Open alerts", len(alerts))
+    c2.metric("Vendors affected", len(vendors))
+    c3.metric("Max days overdue", max(days_vals) if days_vals else 0)
+
+    st.markdown("")  # a little breathing room
+
+    # Newest first (by alerted_at), then most overdue.
+    ordered = sorted(
+        alerts,
+        key=lambda a: (a.get("alerted_at") or "", int(a.get("days_overdue") or 0)),
+        reverse=True,
+    )
+    st.markdown(
+        "".join(_alert_card(a) for a in ordered),
+        unsafe_allow_html=True,
+    )
 
 
 # --------------------------------------------------------------------------- #

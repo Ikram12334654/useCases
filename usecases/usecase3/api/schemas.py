@@ -17,14 +17,31 @@ class FlagInvoiceRequest(BaseModel):
     """Route an invoice with variances into the human-review queue."""
 
     invoice_number: str
-    vendor_name: str
+    vendor: str
     po_number: str
-    total_amount: float
-    match_result: Optional[Any] = Field(
-        None, description="The matcher output (dict) or a summary label."
-    )
+    invoice_amount: float
+    match_result: str
+    status: Optional[str] = "Pending Review"
+    approved_by: Optional[str] = "System"
+
+
+class ExtractTextBase64Request(BaseModel):
+    """Extract text from a base64-encoded file (JSON-in, avoids multipart)."""
+
+    content: str = Field(..., description="Base64-encoded file content.")
+    filename: str = Field(..., description="Original filename — its extension picks the handler.")
+
+
+class SaveAlertRequest(BaseModel):
+    """Persist a 'received-not-invoiced' alert to the audit trail."""
+
+    receipt_id: str
+    vendor: str
+    po_number: str
+    received_date: str
+    days_overdue: int
     status: Optional[str] = Field(
-        None, description="Ignored on flag — the server forces 'Pending Review'."
+        None, description="Ignored — the server forces 'Alert - Pending Action'."
     )
 
 

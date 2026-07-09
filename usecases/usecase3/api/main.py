@@ -14,6 +14,10 @@ POST /uc3/flag-invoice      queue an invoice with variances for human review
 GET  /uc3/flagged-invoices  list the review queue
 POST /uc3/post-invoice      approve + post an invoice, mint a payment reference
 GET  /uc3/check-alerts      goods received but not yet invoiced (accrual risk)
+POST /uc3/save-alert        persist an alert to the audit trail
+GET  /uc3/alerts            list every saved alert
+POST /uc3/extract-text      pull raw text / base64 from an uploaded PDF/image/TXT
+POST /uc3/extract-text-base64  same, but JSON-in (base64) — Power Automate friendly
 
 The mock AP ledgers are plain JSON files under ``usecases/usecase3/data/``; in
 production these routes would front the ERP's AP module instead.
@@ -21,20 +25,28 @@ production these routes would front the ERP's AP module instead.
 
 from __future__ import annotations
 
+import base64
+import traceback
 from datetime import datetime
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from ..alert import check_received_not_invoiced
 from ..config import (
+    ALERTS_PATH,
     FLAGGED_INVOICES_PATH,
     POSTED_INVOICES_PATH,
     RECEIVED_NOT_INVOICED_THRESHOLD_DAYS,
     UC3_CORS_ORIGINS,
 )
 from ..store import append_json, read_json, write_json
-from .schemas import FlagInvoiceRequest, PostInvoiceRequest
+from .schemas import (
+    ExtractTextBase64Request,
+    FlagInvoiceRequest,
+    PostInvoiceRequest,
+    SaveAlertRequest,
+)
 
 app = FastAPI(
     title="AP Invoice Matching API",
@@ -72,11 +84,12 @@ def flag_invoice(req: FlagInvoiceRequest) -> dict:
     try:
         record = {
             "invoice_number": req.invoice_number,
-            "vendor_name": req.vendor_name,
+            "vendor": req.vendor,
             "po_number": req.po_number,
-            "total_amount": req.total_amount,
+            "invoice_amount": req.invoice_amount,
             "match_result": req.match_result,
-            "status": "Pending Review",  # forced regardless of what the client sent
+            "status": req.status or "Pending Review",
+            "approved_by": req.approved_by or "System",
             "flagged_at": _now(),
         }
         append_json(FLAGGED_INVOICES_PATH, record)  # creates the file if absent
@@ -155,3 +168,143 @@ def check_alerts() -> list[dict]:
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(500, f"Failed to compute alerts: {exc}") from exc
+
+
+@app.post("/uc3/save-alert")
+def save_alert(req: SaveAlertRequest) -> dict:
+    """Persist a received-not-invoiced alert to its own audit trail."""
+    try:
+        record = {
+            "receipt_id": req.receipt_id,
+            "vendor": req.vendor,
+            "po_number": req.po_number,
+            "received_date": req.received_date,
+            "days_overdue": req.days_overdue,
+            "status": "Alert - Pending Action",  # forced regardless of client input
+            "alerted_at": _now(),
+        }
+        append_json(ALERTS_PATH, record)  # creates the file if absent
+        return {"status": "saved", "alert": record}
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(500, f"Failed to save alert: {exc}") from exc
+
+
+@app.get("/uc3/alerts")
+def alerts() -> list[dict]:
+    """Return every saved alert (empty list if the file doesn't exist yet)."""
+    try:
+        return read_json(ALERTS_PATH, default=[])
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(500, f"Failed to read alerts: {exc}") from exc
+
+
+@app.post("/uc3/extract-text")
+async def extract_text_endpoint(file: UploadFile = File(...)) -> dict:
+    """
+    Extract raw content from an uploaded document for the caller to hand to an
+    LLM/vision model. This endpoint does NO OpenAI call — it only extracts.
+
+    - PDF        → pdfplumber text from every page (reuses UC1's ``extract_text``)
+    - PNG / JPG  → base64 string (the caller feeds it to a vision model)
+    - TXT        → decoded file contents
+
+    Same error-handling shape as UC1's ``/process``: known HTTP errors pass
+    through; anything else surfaces as a 502 "Extraction failed".
+    """
+    filename = (file.filename or "").lower()
+    try:
+        data = await file.read()
+
+        if filename.endswith(".pdf"):
+            # Reuse UC1's text extractor. Imported lazily so image/txt uploads —
+            # and every other UC3 endpoint — stay free of the heavier UC1 deps
+            # (pdfplumber/LangChain), keeping the standalone UC3 image small.
+            from usecases.sales_order.extractor import extract_text as _extract_pdf_text
+
+            text = _extract_pdf_text(data)
+            source = "pdf"
+        elif filename.endswith((".png", ".jpg", ".jpeg")):
+            text = base64.b64encode(data).decode("ascii")
+            source = "image"
+        elif filename.endswith(".txt"):
+            text = data.decode("utf-8", errors="ignore")
+            source = "txt"
+        else:
+            raise HTTPException(
+                400,
+                f"Unsupported file type: {file.filename!r}. Supported: PDF, PNG, JPG, TXT.",
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001 — surface extraction failures as 502
+        raise HTTPException(502, f"Extraction failed: {exc}") from exc
+
+    return {"text": text, "source": source, "success": True}
+
+
+def _decode_incoming(content: str) -> bytes:
+    """
+    Decode the ``content`` string Power Automate sends. It doesn't always emit
+    clean, correctly-padded base64, so try progressively looser strategies:
+
+      1. Standard base64 decode.
+      2. Base64 decode after re-padding to a multiple of 4 with '='.
+      3. Treat the string as raw UTF-8 text (it wasn't base64 at all).
+    """
+    # 1. Standard base64.
+    try:
+        return base64.b64decode(content, validate=True)
+    except Exception:
+        pass
+    # 2. Re-pad, then base64 (lenient — ignores stray whitespace/newlines).
+    try:
+        padded = content + "=" * (-len(content) % 4)
+        return base64.b64decode(padded)
+    except Exception:
+        pass
+    # 3. Not base64 — the raw string is already the content.
+    return content.encode("utf-8")
+
+
+@app.post("/uc3/extract-text-base64")
+def extract_text_base64(req: ExtractTextBase64Request) -> dict:
+    """
+    JSON-in twin of ``/uc3/extract-text`` — accepts base64 content instead of a
+    multipart upload, so clients like Power Automate that struggle with
+    multipart/form-data can just POST JSON. No OpenAI call.
+
+    Never raises to the client: on any failure it returns HTTP 200 with
+    ``{"text": "", "source": "error", "success": false, "error": "..."}`` so
+    Power Automate can read the message instead of choking on a 500.
+    """
+    try:
+        filename = (req.filename or "").lower()
+        print(f"[extract-text-base64] filename received: {req.filename!r}")
+        print(f"[extract-text-base64] content length received: {len(req.content or '')}")
+
+        data = _decode_incoming(req.content or "")
+
+        if filename.endswith(".pdf"):
+            # Reuse UC1's text extractor (lazy import — see /uc3/extract-text).
+            from usecases.sales_order.extractor import extract_text as _extract_pdf_text
+
+            text = _extract_pdf_text(data)
+            source = "pdf"
+        elif filename.endswith((".png", ".jpg", ".jpeg")):
+            # Re-encode the decoded bytes to clean base64 for the vision model.
+            text = base64.b64encode(data).decode("ascii")
+            source = "image"
+        elif filename.endswith(".txt"):
+            text = data.decode("utf-8", errors="ignore")
+            source = "txt"
+        else:
+            # Unknown extension — best-effort UTF-8 decode.
+            text = data.decode("utf-8", errors="ignore")
+            source = "txt"
+
+        print(f"[extract-text-base64] first 100 chars of decoded text: {(text or '')[:100]!r}")
+        return {"text": text, "source": source, "success": True}
+
+    except Exception as exc:  # noqa: BLE001 — never 500 to Power Automate
+        traceback.print_exc()
+        return {"text": "", "source": "error", "success": False, "error": str(exc)}

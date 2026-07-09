@@ -38,6 +38,7 @@ DATA_DIR = UC3_DIR / "data"
 FLAGGED_INVOICES_PATH = DATA_DIR / "flagged_invoices.json"   # exceptions awaiting review
 POSTED_INVOICES_PATH = DATA_DIR / "posted_invoices.json"     # approved + paid (mock)
 RECEIPTS_PATH = DATA_DIR / "receipts.json"                   # goods receipts (mock)
+ALERTS_PATH = DATA_DIR / "alerts.json"                       # received-not-invoiced alerts
 
 # ── Thresholds ───────────────────────────────────────────────────────────
 # Unit-price comparisons tolerate this much rounding noise (currency minor units).

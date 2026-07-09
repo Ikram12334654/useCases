@@ -1,16 +1,13 @@
 [
   {
-    "invoice_number": "INV-1001",
+    "invoice_number": "INV-2026-001",
     "vendor": "MedSupply Corp",
     "po_number": "PO-2026-001",
-    "invoice_amount": 1650.0,
-    "match_result": {
-      "match_result": "PERFECT_MATCH",
-      "flags": []
-    },
-    "status": "Posted",
-    "approved_by": "demo.user",
+    "invoice_amount": 1001.7,
+    "match_result": "PERFECT_MATCH",
+    "status": "Auto Approved",
+    "approved_by": "System",
     "payment_ref": "PAY-2026-00001",
-    "posted_at": "2026-07-08 20:03:49"
+    "posted_at": "2026-07-09 19:49:59"
   }
 ]
