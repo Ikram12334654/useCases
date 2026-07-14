@@ -147,18 +147,26 @@ def render() -> None:
             )
             st.stop()
 
-    if "order" not in st.session_state:
-        st.session_state.order = None
-        st.session_state.match = None
-        st.session_state.confidence = None
-        st.session_state.created = None
-        st.session_state.auto_created = False   # created via straight-through?
-        st.session_state.preview_kind = None   # "pdf" | "image" | "text"
-        st.session_state.preview_bytes = None
-        st.session_state.preview_text = None
-        st.session_state.original_order = None  # AI's first extraction, never overwritten
-        st.session_state.editing = False
-        st.session_state.edit_count = 0
+    # setdefault (not a single "if 'order' not in state" gate) so a browser
+    # session that connected before a deploy — and so is missing keys a later
+    # deploy introduced — gets those keys backfilled instead of AttributeError-ing
+    # on first access. Streamlit Cloud can reconnect an existing session's state
+    # to freshly-deployed code without re-running this block from scratch.
+    _DEFAULTS = {
+        "order": None,
+        "match": None,
+        "confidence": None,
+        "created": None,
+        "auto_created": False,   # created via straight-through?
+        "preview_kind": None,    # "pdf" | "image" | "text"
+        "preview_bytes": None,
+        "preview_text": None,
+        "original_order": None,  # AI's first extraction, never overwritten
+        "editing": False,
+        "edit_count": 0,
+    }
+    for _key, _default in _DEFAULTS.items():
+        st.session_state.setdefault(_key, _default)
 
     # ----------------------------------------------------------------------- #
     # Sidebar — input
